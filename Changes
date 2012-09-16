@@ -1,5 +1,9 @@
 Revision history for Perl extension Net::DNS::Paranoid
 
+0.06
+
+    - more better dist packaging
+
 0.05
 
     - better dist packaging

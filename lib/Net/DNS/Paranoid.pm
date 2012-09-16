@@ -2,7 +2,7 @@ package Net::DNS::Paranoid;
 use strict;
 use warnings;
 use 5.008008;
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 use Class::Accessor::Lite (
     rw => [qw(timeout blocked_hosts whitelisted_hosts resolver)]
@@ -280,6 +280,10 @@ Please use it.
 =head1 THANKS TO
 
 Most of code was taken from L<LWPx::ParanoidAgent>.
+
+=head1 AUTHOR
+
+Tokuhiro Matsuno < tokuhirom @A gmail DOT. com>
 
 =head1 LICENSE
 
