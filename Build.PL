@@ -8,11 +8,9 @@ my $build = Module::Build->new(
 
     build_requires       => {
         'Test::More' => '0.98',
-        'Test::Requires' => 0,
     },
     configure_requires   => { 'Module::Build' => '0.38' },
     requires             => {
-        'parent'                => '0',
         'Net::DNS'              => '0.68',
         'Class::Accessor::Lite' => '0.05',
     },
