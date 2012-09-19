@@ -13,6 +13,7 @@ my $build = Module::Build->new(
     requires             => {
         'Net::DNS'              => '0.68',
         'Class::Accessor::Lite' => '0.05',
+        'parent' => '0',
         perl => '5.008008',
     },
 
