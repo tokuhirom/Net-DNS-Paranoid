@@ -2,6 +2,10 @@ Revision history for Perl extension Net::DNS::Paranoid
 
 {{$NEXT}}
 
+0.08 2015-09-30T07:01:36Z
+
+    - fixed test case
+
 0.07
 
     - fixed deps

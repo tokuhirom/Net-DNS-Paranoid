@@ -66,7 +66,7 @@
          "web" : "https://github.com/tokuhirom/Net-DNS-Paranoid"
       }
    },
-   "version" : "0.07",
+   "version" : "0.08",
    "x_contributors" : [
       "Tokuhiro Matsuno <tokuhirom@gmail.com>"
    ],
