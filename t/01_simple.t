@@ -2,6 +2,7 @@ use strict;
 use warnings;
 use utf8;
 use Test::More;
+use lib '.';
 use lib 'lib';
 use Net::DNS::Paranoid;
 use t::MockResolver;
