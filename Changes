@@ -2,6 +2,10 @@ Revision history for Perl extension Net::DNS::Paranoid
 
 {{$NEXT}}
 
+0.10 2024-06-22T05:07:58Z
+
+    force reindex!
+
 0.09 2024-02-06T05:59:30Z
 
     commit 2d84b68bcdcf1325ba15d6d0252894d828a0d765
