@@ -8,17 +8,32 @@ use Class::Accessor::Lite (
     rw => [qw(timeout blocked_hosts whitelisted_hosts resolver)]
 );
 use Net::DNS;
+use Time::HiRes qw( alarm );
+use POSIX qw( ceil );
 
 sub new {
     my $class = shift;
     my %args = @_ ==1 ? %{$_[0]} : @_;
-    $args{resolver} ||= Net::DNS::Resolver->new;
+
+    $args{timeout} ||= 15;
+
+    unless ($args{resolver}) {
+        my $res = $args{resolver} = Net::DNS::Resolver->new(
+            # Calculate the nearest base 2 exponent that would cover the timeout period
+            # So, 1+2+4+8 = 15 seconds, which would be 4 retries
+            retrans => 1,
+            retry   => ceil( log($args{timeout} + 1) / log(2) ),
+            udp_timeout => $args{timeout},
+        );
+
+        # no staggered retries, full time used is $timeout * $num_of_ns
+        my $num_of_ns = scalar $res->nameservers;
+        $res->tcp_timeout( ceil( $args{timeout} / $num_of_ns ) );
+    }
+
     $args{whitelisted_hosts} ||= [];
     $args{blocked_hosts} ||= [];
-    bless {
-        timeout => 15,
-        %args
-    }, $class;
+    bless { %args }, $class;
 }
 
 sub resolve {
@@ -41,21 +56,20 @@ sub _resolve {
     # return the IP address if it looks like one and wasn't marked bad
     return ([$host]) if $host =~ /^\d+\.\d+\.\d+\.\d+$/;
  
-    my $sock = $res->bgsend($host)
-        or return (undef, "No sock from bgsend");
- 
-    # wait for the socket to become readable, unless this is from our test
-    # mock resolver.
-    unless ($sock && $sock eq "MOCK") {
-        my $rin = '';
-        vec($rin, fileno($sock), 1) = 1;
-        my $nf = select($rin, undef, undef, $self->_time_remain($start_time));
-        return (undef, "DNS lookup timeout") unless $nf;
+    # Find the host using Resolver's send method, which supports timeouts
+    # and alternate NSs.  Most of the time, this will use UDP, but may
+    # switch to TCP in certain situations.
+    my $packet;
+    local $SIG{ALRM} = sub { die "DNS lookup timeout\n" };
+    alarm $self->_time_remain($start_time);
+    eval { $packet = $res->send($host) };
+    alarm 0;
+
+    unless ($packet) {
+        my $errstr = $@ || "DNS send failure: ".$res->errorstring;
+        chomp $errstr;
+        return (undef, $errstr);
     }
- 
-    my $packet = $res->bgread($sock)
-        or return (undef, "DNS bgread failure");
-    $sock = undef;
  
     my @addr;
     my $cname;

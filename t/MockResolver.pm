@@ -32,6 +32,11 @@ sub _make_proxy {
                 if $ENV{VERBOSE};
             return $self->{next_fake_packet};
         }
+        if ($method eq "send" && $fr->{$_[0]}) {
+            Test::More::note("mock DNS resolver doing fake send() of $_[0]\n")
+                if $ENV{VERBOSE};
+            return $fr->{$_[0]};
+        }
         # No verbose conditional on this one because it shouldn't happen:
         Test::More::note("Calling through to Net::DNS::Resolver proxy method '$method'");
         return $self->{proxy}->$method(@_);
