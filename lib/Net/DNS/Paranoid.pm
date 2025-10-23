@@ -34,10 +34,10 @@ sub _resolve {
     my ($self, $host, $start_time, $timeout, $depth) = @_;
     my $res = $self->resolver;
     $depth ||= 0;
- 
+
     return (undef, "CNAME recursion depth limit exceeded.") if $depth > 10;
     return (undef, "DNS lookup resulted in bad host.") if $self->_bad_host($host);
- 
+
     # return the IP address if it looks like one and wasn't marked bad
     return ([$host]) if $host =~ /^\d+\.\d+\.\d+\.\d+$/;
  
@@ -79,7 +79,7 @@ sub _resolve {
 sub _time_remain {
     my $self       = shift;
     my $start_time = shift;
- 
+
     return $start_time + $self->{timeout} - time();
 }
 
@@ -87,7 +87,7 @@ sub _host_list_match {
     my $self = shift;
     my $list_name = shift;
     my $host = shift;
- 
+
     foreach my $rule (@{ $self->{$list_name} || [] }) {
         if (ref $rule eq "CODE") {
             return 1 if $rule->($host);
@@ -104,7 +104,7 @@ sub _host_list_match {
 sub _bad_host {
     my $self = shift;
     my $host = lc(shift);
- 
+
     return 0 if $self->_host_list_match("whitelisted_hosts", $host);
     return 1 if $self->_host_list_match("blocked_hosts", $host);
     return 1 if
@@ -119,7 +119,7 @@ sub _bad_host {
     # back here later when the resolver finds an IP address.
     my @parts = split(/\./, $host);
     return 0 if @parts > 4;
- 
+
     # un-octal/un-hex the parts, or return if there's a non-numeric part
     my $overflow_flag = 0;
     foreach (@parts) {
@@ -127,12 +127,12 @@ sub _bad_host {
         local $SIG{__WARN__} = sub { $overflow_flag = 1; };
         $_ = oct($_) if /^0/;
     }
- 
+
     # a purely numeric address shouldn't overflow.
     return 1 if $overflow_flag;
- 
+
     my $addr;  # network order packed IP address
- 
+
     if (@parts == 1) {
         # a - 32 bits
         return 1 if
@@ -162,7 +162,7 @@ sub _bad_host {
     } else {
         return 1;
     }
- 
+
     my $haddr = unpack("N", $addr); # host order IP address
     return 1 if
         ($haddr & 0xFF000000) == 0x00000000 || # 0.0.0.0/8
@@ -175,7 +175,7 @@ sub _bad_host {
         ($haddr & 0xFFFFFF00) == 0xC0586300 || # 192.88.99.0/24 6to4 relay anycast addresses
          $haddr               == 0xFFFFFFFF || # 255.255.255.255
         ($haddr & 0xF0000000) == 0xE0000000;  # multicast addresses
- 
+
     # as final IP address check, pass in the canonical a.b.c.d decimal form
     # to the blacklisted host check to see if matches as bad there.
     my $can_ip = join(".", map { ord } split //, $addr);
