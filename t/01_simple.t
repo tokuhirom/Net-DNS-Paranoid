@@ -96,5 +96,65 @@ subtest 'localhost is blocked, case insensitive' => sub {
         [ undef, 'DNS lookup resulted in bad host.' ] );
 };
 
+subtest ':: is blocked' => sub {
+    is_deeply( [ $dns->resolve('::') ],
+        [ undef, 'DNS lookup resulted in bad host.' ] );
+};
+
+subtest '::1 is blocked' => sub {
+    is_deeply( [ $dns->resolve('::1') ],
+        [ undef, 'DNS lookup resulted in bad host.' ] );
+};
+
+subtest 'Hostnames resolving to ::1 are blocked' => sub {
+    is_deeply( [ $dns->resolve('--1.sslip.io') ],
+        [ undef, 'Suspicious DNS results from AAAA record' ] );
+};
+
+subtest 'ipv4-in-ipv6 is blocked' => sub {
+    is_deeply( [ $dns->resolve('::ffff:127.0.0.1') ],
+        [ undef, 'DNS lookup resulted in bad host.' ] );
+};
+
+subtest 'ipv6 multicast is blocked (internet-wide)' => sub {
+    is_deeply( [ $dns->resolve('ff00::') ],
+        [ undef, 'DNS lookup resulted in bad host.' ] );
+};
+
+subtest 'ipv6 multicast is blocked (interface-local)' => sub {
+    is_deeply( [ $dns->resolve('ff01::') ],
+        [ undef, 'DNS lookup resulted in bad host.' ] );
+};
+
+subtest 'ipv6 multicast is blocked (link-local)' => sub {
+    is_deeply( [ $dns->resolve('ff02::') ],
+        [ undef, 'DNS lookup resulted in bad host.' ] );
+};
+
+subtest 'ipv6 multicast is blocked (realm-local)' => sub {
+    is_deeply( [ $dns->resolve('ff03::') ],
+        [ undef, 'DNS lookup resulted in bad host.' ] );
+};
+
+subtest 'ipv6 link-local is blocked' => sub {
+    is_deeply( [ $dns->resolve('fe80::') ],
+        [ undef, 'DNS lookup resulted in bad host.' ] );
+};
+
+subtest 'ipv6 private is blocked' => sub {
+    is_deeply( [ $dns->resolve('fc00::') ],
+        [ undef, 'DNS lookup resulted in bad host.' ] );
+};
+
+subtest 'ipv6 example addresses are blocked' => sub {
+    is_deeply( [ $dns->resolve('3fff::1') ],
+        [ undef, 'DNS lookup resulted in bad host.' ] );
+};
+
+subtest 'Hostnames resolving to IPv6 work' => sub {
+    is_deeply( [ $dns->resolve('2a01-4f8-c17-b8f--2.sslip.io') ],
+        [ ['2a01:4f8:c17:b8f::2'], undef ] );
+};
+
 done_testing;
 
