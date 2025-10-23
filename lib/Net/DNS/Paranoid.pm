@@ -8,6 +8,7 @@ use Class::Accessor::Lite (
     rw => [qw(timeout blocked_hosts whitelisted_hosts resolver)]
 );
 use Net::DNS;
+use IPv6::Address;
 
 sub new {
     my $class = shift;
@@ -34,29 +35,38 @@ sub _resolve {
     my ($self, $host, $start_time, $timeout, $depth) = @_;
     my $res = $self->resolver;
     $depth ||= 0;
- 
+
     return (undef, "CNAME recursion depth limit exceeded.") if $depth > 10;
     return (undef, "DNS lookup resulted in bad host.") if $self->_bad_host($host);
- 
+
     # return the IP address if it looks like one and wasn't marked bad
     return ([$host]) if $host =~ /^\d+\.\d+\.\d+\.\d+$/;
- 
-    my $sock = $res->bgsend($host)
-        or return (undef, "No sock from bgsend");
- 
-    # wait for the socket to become readable, unless this is from our test
-    # mock resolver.
-    unless ($sock && $sock eq "MOCK") {
-        my $rin = '';
-        vec($rin, fileno($sock), 1) = 1;
-        my $nf = select($rin, undef, undef, $self->_time_remain($start_time));
-        return (undef, "DNS lookup timeout") unless $nf;
+
+    # We ask sequentially for IPv4 and IPv6 name resolution. This can later
+    # be done in parallel here
+    my @responses;
+    for my $type ('A', 'AAAA') {
+        my $sock = $res->bgsend($host, $type)
+            or return (undef, "No sock from bgsend");
+
+        # wait for the socket to become readable, unless this is from our test
+        # mock resolver.
+        unless ($sock && $sock eq "MOCK") {
+            my $rin = '';
+            vec($rin, fileno($sock), 1) = 1;
+            my $nf = select($rin, undef, undef, $self->_time_remain($start_time));
+            return (undef, "DNS lookup timeout") unless $nf;
+        }
+
+        my $packet = $res->bgread($sock)
+            or return (undef, "DNS bgread failure");
+        $sock = undef;
+        push @responses, $packet;
     }
- 
-    my $packet = $res->bgread($sock)
-        or return (undef, "DNS bgread failure");
-    $sock = undef;
- 
+    # Find the first reply that has some answers
+    (my $packet) = grep { 0+$_->answer } @responses;
+    $packet //= shift @responses; # otherwise, take any reply with no answer
+
     my @addr;
     my $cname;
     foreach my $rr ($packet->answer) {
@@ -67,9 +77,14 @@ sub _resolve {
         } elsif ($rr->type eq "CNAME") {
             # will be checked for validity in the recursion path
             $cname = $rr->cname;
+        } elsif($rr->type eq "AAAA") {
+            my $addr = eval { IPv6::Address->new( $rr->address . "/128" )};
+            return (undef, "Suspicious DNS results from AAAA record") if !$addr;
+            return (undef, "Suspicious DNS results from AAAA record") if $self->_bad_host($addr->addr_string);
+            push @addr, $addr->addr_string;
         }
     }
- 
+
     return (\@addr) if @addr;
     return ([]) unless $cname;
     return $self->_resolve($cname, $start_time, $timeout, $depth + 1);
@@ -79,7 +94,7 @@ sub _resolve {
 sub _time_remain {
     my $self       = shift;
     my $start_time = shift;
- 
+
     return $start_time + $self->{timeout} - time();
 }
 
@@ -87,7 +102,7 @@ sub _host_list_match {
     my $self = shift;
     my $list_name = shift;
     my $host = shift;
- 
+
     foreach my $rule (@{ $self->{$list_name} || [] }) {
         if (ref $rule eq "CODE") {
             return 1 if $rule->($host);
@@ -104,14 +119,19 @@ sub _host_list_match {
 sub _bad_host {
     my $self = shift;
     my $host = lc(shift);
- 
+
     return 0 if $self->_host_list_match("whitelisted_hosts", $host);
     return 1 if $self->_host_list_match("blocked_hosts", $host);
     return 1 if
         $host =~ /^localhost$/i ||    # localhost is bad.  even though it'd be stopped in
                                       #    a later call to _bad_host with the IP address
         $host =~ /\s/i;               # any whitespace is questionable
- 
+
+    if( $host =~ /:/ ) {
+        # It's an IPv6 address
+        return $self->_bad_ipv6_address( $host );
+    }
+
     # Let's assume it's an IP address now, and get it into 32 bits.
     # If at any time something doesn't look like a number, then it's
     # probably a hostname and we've already either whitelisted or
@@ -119,7 +139,7 @@ sub _bad_host {
     # back here later when the resolver finds an IP address.
     my @parts = split(/\./, $host);
     return 0 if @parts > 4;
- 
+
     # un-octal/un-hex the parts, or return if there's a non-numeric part
     my $overflow_flag = 0;
     foreach (@parts) {
@@ -127,12 +147,12 @@ sub _bad_host {
         local $SIG{__WARN__} = sub { $overflow_flag = 1; };
         $_ = oct($_) if /^0/;
     }
- 
+
     # a purely numeric address shouldn't overflow.
     return 1 if $overflow_flag;
- 
+
     my $addr;  # network order packed IP address
- 
+
     if (@parts == 1) {
         # a - 32 bits
         return 1 if
@@ -162,7 +182,7 @@ sub _bad_host {
     } else {
         return 1;
     }
- 
+
     my $haddr = unpack("N", $addr); # host order IP address
     return 1 if
         ($haddr & 0xFF000000) == 0x00000000 || # 0.0.0.0/8
@@ -175,12 +195,50 @@ sub _bad_host {
         ($haddr & 0xFFFFFF00) == 0xC0586300 || # 192.88.99.0/24 6to4 relay anycast addresses
          $haddr               == 0xFFFFFFFF || # 255.255.255.255
         ($haddr & 0xF0000000) == 0xE0000000;  # multicast addresses
- 
+
     # as final IP address check, pass in the canonical a.b.c.d decimal form
     # to the blacklisted host check to see if matches as bad there.
     my $can_ip = join(".", map { ord } split //, $addr);
     return 1 if $self->_host_list_match("blocked_hosts", $can_ip);
- 
+
+    # looks like an okay IP address
+    return 0;
+}
+
+# From https://en.wikipedia.org/wiki/IPv6_address
+our %blocked_ipv6_ranges = (
+    examples_2001 => IPv6::Address->new('2001:db8::/32'),
+    examples_3fff => IPv6::Address->new('3fff::/20'),
+    private       => IPv6::Address->new('fc00::/7'),
+    link_local    => IPv6::Address->new('fe80::/64'),
+);
+
+sub _bad_ipv6_address {
+    my $self = shift;
+    my $host = lc(shift);
+
+    return 1 if $host eq '::'; # Unspecified address
+
+    return 0 if $self->_host_list_match("whitelisted_hosts", $host);
+    return 1 if $self->_host_list_match("blocked_hosts", $host);
+    return 1 if $host =~ m![^a-f0-9:]!;
+
+    my $addr = IPv6::Address->new("$host/128");
+    return 1 if ! $addr; # malformed IPv6 address
+    return 0 if $self->_host_list_match("whitelisted_hosts", $addr);
+    return 1 if $self->_host_list_match("blocked_hosts", $addr);
+
+    return 1 if $addr->is_loopback;
+    return 1 if $addr->is_multicast;
+
+    for my $range (values %blocked_ipv6_ranges) {
+        return 1 if $range->contains($addr);
+    }
+
+    # as final IP address check, pass in the canonical a.b.c.d decimal form
+    # to the blacklisted host check to see if matches as bad there.
+    return 1 if $self->_host_list_match("blocked_hosts", $addr->addr_string( nocompress => 1 ));
+
     # looks like an okay IP address
     return 0;
 }
